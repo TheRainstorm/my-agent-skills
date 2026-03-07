@@ -1,30 +1,72 @@
 ---
 name: tjupt-downloader
-description: Download anime, movies, and TV shows from multiple BT/PT sources (TJUPT, 动漫花园) and add to qBittorrent. Use when user wants to download media content and add torrents to qBittorrent with specific category. Supports searching https://www.tjupt.org/torrents.php and https://share.dmhy.org/ with fallback logic.
+description: Download anime, movies, and TV shows from TJUPT PT station and add to qBittorrent. Use when user wants to download media content from TJUPT (北洋园PT) and add torrents to qBittorrent with specific category. Supports searching https://www.tjupt.org/torrents.php and adding to http://docker.op1:9090/ with categories like Anime1, Movie3, TV1, etc.
 ---
 
-# Multi-Source Downloader (TJUPT + 动漫花园)
+# TJUPT Downloader
 
-自动化从多个 BT/PT 站点搜索资源并添加到 qBittorrent 下载。支持 TJUPT（北洋园 PT）和动漫花园，按优先级搜索。
+自动化从北洋园 PT 站 (TJUPT) 搜索资源并添加到 qBittorrent 下载。
 
-## 支持站点
+## 架构设计
 
-| 站点 | URL | 优先级 | 说明 |
-|------|-----|--------|------|
-| TJUPT | https://www.tjupt.org/torrents.php | 1 | 北洋园 PT，需要登录 |
-| 动漫花园 | https://share.dmhy.org/ | 2 | 动漫资源专用站，无需登录 |
+本 skill 采用**主从代理架构**：
 
-## 工作流程
+1. **主代理人 (Main Agent)**：负责与用户交流，确认需求，报告状态
+2. **子代理人 (Sub-agent)**：负责执行实际的浏览器操作和下载任务
 
-1. **首选 TJUPT 搜索**: 访问 https://www.tjupt.org/torrents.php 搜索资源
-2. **如果 TJUPT 无结果**: 自动切换到动漫花园 https://share.dmhy.org/ 搜索
-3. **获取磁力链接**: 找到目标资源后提取磁力链接
-4. **添加到 qBittorrent**: 通过 Web UI 添加到 http://docker.op1:9090/
-5. **选择分类**: 根据用户要求选择对应分类 (Anime1, Movie3, TV1 等)
+### 工作流程
+
+```
+用户请求 → 主代理人确认 → 创建子代理人执行 → 子代理人汇报 → 主代理人反馈用户
+```
+
+## 执行步骤
+
+### 阶段1：需求确认（主代理人执行）
+
+1. 理解用户下载需求（资源名称、目标分类）
+2. 确认 qBittorrent 分类（Anime1, Movie3, TV1 等）
+3. 向用户确认下载计划
+
+### 阶段2：创建子代理人执行任务
+
+使用 `sessions_spawn` 创建子代理人：
+
+```
+runtime: "subagent"
+mode: "run"
+task: "在 TJUPT 搜索《资源名》，找到所有相关种子，获取磁力链接，添加到 qBittorrent 的《分类》"
+```
+
+### 阶段3：监控和汇报（主代理人执行）
+
+1. 等待子代理人完成
+2. 获取 qBittorrent 下载状态
+3. 向用户汇报结果
+
+## 获取磁力链接的方法
+
+在 TJUPT 种子详情页：
+1. 找到"种子名称"下面的"行为"一行
+2. "下载种子"右边有"复制种子直链"
+3. 点击获取磁力链接（格式：`https://tjupt.org/download.php?id=xxx&passkey=...`）
+
+## qBittorrent API 使用
+
+添加种子：
+```bash
+curl -X POST "http://docker.op1:9090/api/v2/torrents/add" \
+  -F "urls=磁力链接" \
+  -F "category=分类名" \
+  -F "autoTMM=false"
+```
+
+查询状态：
+```bash
+curl "http://docker.op1:9090/api/v2/torrents/info?category=分类名"
+```
 
 ## qBittorrent 分类说明
-
-分类名称中的数字代表下载到不同磁盘：
 
 | 分类 | 用途 |
 |------|------|
@@ -32,67 +74,37 @@ description: Download anime, movies, and TV shows from multiple BT/PT sources (T
 | Movie3 | 电影资源 |
 | TV1 | 电视剧资源 |
 
-**注意**: 分类名称必须完全匹配，包括大小写和数字。
+## 子代理人任务指令模板
 
-## 使用示例
+当创建子代理人时，使用以下任务描述：
 
-用户指令示例：
-- "帮我下载《鬼灭之刃》到 Anime1"
-- "搜索电影《沙丘》并添加到 Movie3"
-- "找一下《三体》电视剧，下载到 TV1"
+```
+任务：从 TJUPT 下载《资源名》到 qBittorrent 分类《分类名》
 
-## 执行步骤
+步骤：
+1. 打开浏览器访问 https://www.tjupt.org/torrents.php
+2. 搜索《资源名》
+3. 找到所有相关种子（注意集数/版本）
+4. 对每个种子：
+   a. 打开详情页
+   b. 点击"复制种子直链"获取磁力链接
+   c. 使用 curl 添加到 qBittorrent:
+      curl -X POST "http://docker.op1:9090/api/v2/torrents/add" \
+        -F "urls=磁力链接" \
+        -F "category=分类名" \
+        -F "autoTMM=false"
+5. 验证所有种子已添加成功
+6. 返回下载结果（成功数量、失败数量、种子列表）
 
-### TJUPT 搜索
-
-1. 打开 TJUPT 种子页面: https://www.tjupt.org/torrents.php
-2. 在搜索框 (ref=e303) 输入关键词并点击搜索 (ref=e319)
-3. 检查搜索结果：
-   - 如果有结果：找到匹配的资源，获取磁力链接
-   - 如果显示"没有种子"：切换到动漫花园搜索
-
-### 动漫花园搜索（TJUPT 无结果时）
-
-1. 打开动漫花园首页: https://share.dmhy.org/
-2. 在搜索框输入关键词并搜索
-3. 从搜索结果中找到匹配的资源
-4. 点击资源进入详情页获取磁力链接
-
-### 添加到 qBittorrent
-
-1. 打开 qBittorrent Web UI: http://docker.op1:9090/
-2. 磁力链接位于表格的 "磁鏈" 列里的向下箭头上
-3. 粘贴磁力链接
-4. 设置分类（Anime1/Movie3/TV1 等）
-5. 确认开始下载
-
-## 搜索关键词策略
-
-- **优先尝试完整名称**: 如"魔王的女儿过于温柔"
-- **如果无结果，尝试简化**: 如"魔王的女儿"
-- **可以尝试日文/英文原名**: 如果中文名无结果
+注意：
+- TJUPT 需要登录，使用当前浏览器会话
+- 磁力链接格式：https://tjupt.org/download.php?id=xxx&passkey=...
+- 添加成功后 API 返回 "Ok"
+```
 
 ## 注意事项
 
-- **TJUPT 需要登录**: 确保浏览器已保存登录状态
-- **动漫花园无需登录**: 可直接访问搜索
-- **分类名称必须正确**: Anime1, Movie3, TV1 等
-- **部分资源可能需要分享率**: TJUPT 部分资源有下载限制
-- **优先 TJUPT**: 因为是 PT 站，资源质量通常更高
-- **动漫花园作为备选**: 专门针对动漫资源，更新较快
-
-## 站点选择逻辑
-
-```
-用户请求下载
-    ↓
-搜索 TJUPT
-    ↓
-有结果？───是───→ 获取磁力链接 → 添加到 qBittorrent
-    ↓ 否
-搜索动漫花园
-    ↓
-有结果？───是───→ 获取磁力链接 → 添加到 qBittorrent
-    ↓ 否
-告知用户无资源
-```
+- TJUPT 需要登录才能访问，确保浏览器已保存登录状态
+- 分类名称区分大小写，必须完全匹配
+- 部分资源可能需要一定的分享率才能下载
+- 连载动漫可能没有完整全集，需要逐集下载
