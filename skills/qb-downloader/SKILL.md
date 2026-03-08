@@ -42,7 +42,7 @@ description: 从 BT(BitTorrent) 和 PT(Private Tracker) 站点搜索资源，获
     curl -X POST "${qb_url}/api/v2/torrents/add" \
       -F "urls=磁力链接" \
       -F "category={category}" \
-      -F "autoTMM=false"
+      -F "autoTMM=true"
     ```
   - 成功时 API 返回 "Ok" 或空字符串
 
